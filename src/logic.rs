@@ -13,10 +13,33 @@
 use log::info;
 use rand::seq::SliceRandom;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
-use crate::{Battlesnake, Board, Game};
+use crate::{Battlesnake, Board, Coord, Game};
 
+impl Coord {
+    fn neighbors(&self) -> [Coord; 4] {
+        [
+            Coord {
+                x: self.x,
+                y: self.y + 1,
+            },
+            Coord {
+                x: self.x,
+                y: self.y - 1,
+            },
+            Coord {
+                x: self.x + 1,
+                y: self.y,
+            },
+            Coord {
+                x: self.x - 1,
+                y: self.y,
+            },
+        ]
+    }
+}
 // info is called when you create your Battlesnake on play.battlesnake.com
 // and controls your Battlesnake's appearance
 // TIP: If you open your Battlesnake URL in a browser you should see this data
@@ -45,8 +68,8 @@ pub fn end(_game: &Game, _turn: &i32, _board: &Board, _you: &Battlesnake) {
 // move is called on every turn and returns your next move
 // Valid moves are "up", "down", "left", or "right"
 // See https://docs.battlesnake.com/api/example-move for available data
-pub fn get_move(_game: &Game, turn: &i32, _board: &Board, you: &Battlesnake) -> Value {
-    
+pub fn get_move(_game: &Game, turn: &i32, board: &Board, you: &Battlesnake) -> Value {
+    println!("TURN {}", turn);
     let mut is_move_safe: HashMap<_, _> = vec![
         ("up", true),
         ("down", true),
@@ -58,44 +81,233 @@ pub fn get_move(_game: &Game, turn: &i32, _board: &Board, you: &Battlesnake) -> 
 
     // We've included code to prevent your Battlesnake from moving backwards
     let my_head = &you.body[0]; // Coordinates of your head
-    let my_neck = &you.body[1]; // Coordinates of your "neck"
-    
-    if my_neck.x < my_head.x { // Neck is left of head, don't move left
+    let _my_neck = &you.body[1]; // Coordinates of your "neck"
+
+    // Step 1 - Prevent your Battlesnake from moving out of bounds
+    let board_width = &board.width;
+    let board_height = &board.height;
+    if my_head.x == 0 {
+        // Head is on left edge, don't move left
         is_move_safe.insert("left", false);
-
-    } else if my_neck.x > my_head.x { // Neck is right of head, don't move right
+    } else if my_head.x == board_width - 1 {
+        // Head is on right edge, don't move right
         is_move_safe.insert("right", false);
+    }
 
-    } else if my_neck.y < my_head.y { // Neck is below head, don't move down
+    if my_head.y == 0 {
+        // Head is on bottom edge, don't move down
         is_move_safe.insert("down", false);
-    
-    } else if my_neck.y > my_head.y { // Neck is above head, don't move up
+    } else if my_head.y == board_height - 1 {
+        // Head is on top edge, don't move up
         is_move_safe.insert("up", false);
     }
 
-    // TODO: Step 1 - Prevent your Battlesnake from moving out of bounds
-    // let board_width = &board.width;
-    // let board_height = &board.height;
+    // Step 2 - Prevent your Battlesnake from colliding with itself
+    //
+    let lookers = HashMap::from([
+        (
+            Coord {
+                x: my_head.x,
+                y: my_head.y + 1,
+            },
+            "up",
+        ),
+        (
+            Coord {
+                x: my_head.x,
+                y: my_head.y - 1,
+            },
+            "down",
+        ),
+        (
+            Coord {
+                x: my_head.x - 1,
+                y: my_head.y,
+            },
+            "left",
+        ),
+        (
+            Coord {
+                x: my_head.x + 1,
+                y: my_head.y,
+            },
+            "right",
+        ),
+    ]);
 
-    // TODO: Step 2 - Prevent your Battlesnake from colliding with itself
-    // let my_body = &you.body;
+    let my_body = &you.body;
 
-    // TODO: Step 3 - Prevent your Battlesnake from colliding with other Battlesnakes
-    // let opponents = &board.snakes;
+    for body_part in my_body.iter() {
+        if lookers.contains_key(body_part) {
+            let direction = lookers.get(body_part).unwrap();
+            println!("Body part is in {:?}", direction);
+            is_move_safe.insert(direction, false);
+        }
+    }
 
+    // Step 3 - Prevent your Battlesnake from colliding with other Battlesnakes
+    let opponents = &board.snakes;
+    for oppponent in opponents {
+        let opponent_body = &oppponent.body;
+        for body_part in opponent_body {
+            if lookers.contains_key(body_part) {
+                let direction = lookers.get(body_part).unwrap();
+                println!("Body of opponent part is in {:?}", direction);
+                is_move_safe.insert(direction, false);
+            }
+        }
+    }
     // Are there any safe moves left?
     let safe_moves = is_move_safe
         .into_iter()
         .filter(|&(_, v)| v)
         .map(|(k, _)| k)
         .collect::<Vec<_>>();
-    
+
     // Choose a random move from the safe ones
-    let chosen = safe_moves.choose(&mut rand::thread_rng()).unwrap();
 
     // TODO: Step 4 - Move towards food instead of random, to regain health and survive longer
-    // let food = &board.food;
+    /*
+    impl Coord {
+        fn successors(&self) -> Vec<Coord> {
+            let &Coord(x, y) = self;
+            vec![
+                Coord(x, y + 1),
+                Coord(x, y - 1),
+                Coord(x - 1, y),
+                Coord(x + 1, y),
+            ]
+        }
+    }
+    let food = &board.food;
+    let result = bfs(&my_head, |p| p.successors(), |p| *p == food&food, &board);
+    */
 
-    info!("MOVE {}: {}", turn, chosen);
-    return json!({ "move": chosen });
+    let food = &board.food;
+    let food_distances: HashMap<&Coord, i32> = food
+        .iter()
+        .map(|food| {
+            (
+                food,
+                (food.x - my_head.x).abs() + (food.y - my_head.y).abs(),
+            )
+        })
+        .collect();
+
+    let closest_food = food_distances
+        .iter()
+        .min_by_key(|&(_, v)| v)
+        .map(|(k, _)| k)
+        .unwrap();
+    let mut desired_move = "left";
+
+    match closest_food {
+        Coord { x, y } => {
+            if *x < my_head.x {
+                // Food is left of head, move left
+                desired_move = "left";
+            } else if *x > my_head.x {
+                // Food is right of head, move right
+                desired_move = "right";
+            } else if *y < my_head.y {
+                // Food is below head, move down
+                desired_move = "down";
+            } else if *y > my_head.y {
+                // Food is above head, move up
+                desired_move = "up";
+            }
+        }
+    }
+    println!("Safe moves: {:?}", safe_moves);
+
+    if !safe_moves.is_empty() {
+        let mut max_count = 0;
+        let mut flood_fill_direction = HashMap::new();
+        for &safe_move in &safe_moves {
+            let count = match safe_move {
+                "up" => flood_fill_count(
+                    &board,
+                    &Coord {
+                        x: my_head.x,
+                        y: my_head.y + 1,
+                    },
+                ),
+                "down" => flood_fill_count(
+                    &board,
+                    &Coord {
+                        x: my_head.x,
+                        y: my_head.y - 1,
+                    },
+                ),
+                "left" => flood_fill_count(
+                    &board,
+                    &Coord {
+                        x: my_head.x - 1,
+                        y: my_head.y,
+                    },
+                ),
+                "right" => flood_fill_count(
+                    &board,
+                    &Coord {
+                        x: my_head.x + 1,
+                        y: my_head.y,
+                    },
+                ),
+                _ => {
+                    println!("Unknown direction");
+                    Ok(0) // Default to 0 in case of an unknown direction
+                }
+            };
+
+            if let Ok(count) = count {
+                flood_fill_direction.insert(safe_move, count);
+                max_count = max_count.max(count);
+            } else {
+                // Handle the error case if flood_fill_count returns an error
+                println!("Error calculating flood fill count");
+            }
+        }
+        println!("Flood fill counts: {:?}", flood_fill_direction);
+        // return a list of the moves with highest flood fill count
+        let best_moves: Vec<&str> = flood_fill_direction
+            .iter()
+            .filter_map(|(&dir, &count)| if count == max_count { Some(dir) } else { None })
+            .collect();
+        if best_moves.contains(&desired_move) {
+            println!("Desired move is safe");
+            json!({ "move": desired_move })
+        } else {
+            println!("Desired move is not safe");
+            json!({ "move": best_moves[0] })
+        }
+    } else {
+        println!("No safe moves");
+        json!({ "move": "up" })
+    }
+}
+
+fn flood_fill_count(board: &Board, start: &Coord) -> Result<i32, &'static str> {
+    let mut visited = HashSet::new();
+    visited.insert(start.clone());
+
+    let mut frontier = vec![start.clone()];
+
+    while !frontier.is_empty() {
+        let mut new_frontier = vec![];
+
+        for coord in frontier {
+            let neighbors = coord.neighbors();
+
+            for neighbor in neighbors {
+                if !visited.contains(&neighbor) && board.is_empty(&neighbor) {
+                    new_frontier.push(neighbor.clone());
+                    visited.insert(neighbor);
+                }
+            }
+        }
+
+        frontier = new_frontier;
+    }
+
+    Ok(visited.len() as i32)
 }

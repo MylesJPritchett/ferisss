@@ -6,7 +6,7 @@ use rocket::fairing::AdHoc;
 use rocket::http::Status;
 use rocket::serde::{json::Json, Deserialize};
 use serde::Serialize;
-use serde_json::{Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 
@@ -24,11 +24,38 @@ pub struct Game {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Board {
-    height: u32,
+    height: i32,
     width: i32,
     food: Vec<Coord>,
     snakes: Vec<Battlesnake>,
     hazards: Vec<Coord>,
+}
+impl Board {
+    fn is_empty(&self, coord: &Coord) -> bool {
+        // Check if the cell is within the board boundaries
+        if coord.x < 0 || coord.x >= self.width || coord.y < 0 || coord.y >= self.height {
+            return false;
+        }
+
+        // Check if the cell is not occupied by a snake or other obstacles
+        !self.is_snake_body(coord) && !self.is_obstacle(coord)
+    }
+
+    // Check if a cell is occupied by a snake body
+    fn is_snake_body(&self, coord: &Coord) -> bool {
+        // Logic to check if the cell is part of a snake's body
+        // Implementation depends on the structure of your Board
+        // For example, you might have a vector of snake bodies
+        self.snakes.iter().any(|snake| snake.body.contains(coord))
+    }
+
+    // Check if a cell is an obstacle (e.g., a wall)
+    fn is_obstacle(&self, coord: &Coord) -> bool {
+        // Logic to check if the cell is an obstacle
+        // Implementation depends on the structure of your Board
+        // For example, you might have a vector of obstacle coordinates
+        self.hazards.contains(coord)
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -43,7 +70,7 @@ pub struct Battlesnake {
     shout: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Clone)]
 pub struct Coord {
     x: i32,
     y: i32,
