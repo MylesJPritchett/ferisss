@@ -11,10 +11,8 @@
 // For more info see docs.battlesnake.com
 
 use log::info;
-use rand::seq::SliceRandom;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 use crate::{Battlesnake, Board, Coord, Game};
 
@@ -48,8 +46,8 @@ pub fn info() -> Value {
 
     return json!({
         "apiversion": "1",
-        "author": "", // TODO: Your Battlesnake Username
-        "color": "#888888", // TODO: Choose color
+        "author": "MylesJPritchett", // TODO: Your Battlesnake Username
+        "color": "#FF5F1F", // TODO: Choose color
         "head": "default", // TODO: Choose head
         "tail": "default", // TODO: Choose tail
     });
