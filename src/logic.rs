@@ -11,11 +11,51 @@
 // For more info see docs.battlesnake.com
 
 use log::info;
+use rand::prelude::*;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 use crate::{Battlesnake, Board, Coord, Game};
 
+trait GameState {
+    fn get_available_moves(&self) -> Vec<Move>;
+    fn apply_move(&self, move: &Move);
+    fn is_terminal(&self) -> bool;
+    fn get_result(&self) -> Option<i32>;
+}
+
+struct Node<State: GameState>{
+    state: State,
+    untried_moves: Vec<Move>,
+    parent: Option<Box<Node<State>>>,
+    num_win: i32,
+    num_visits: i32,
+}
+
+struct MCTS<State: GameState> {
+    root: Node<State>,
+    uct_const: f64,
+}
+
+impl<State: GameState> MCTS<State> {
+    // Selection, expansion, simulation, and backpropagation (implementation details omitted)
+    // ... 
+}
+
+struct Evaluator;
+
+impl Evaluator {
+    fn evaluate(&self, state: &State) -> i32 {
+        // ...
+    }
+}
+
+enum Move {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 impl Coord {
     fn neighbors(&self) -> [Coord; 4] {
         [
