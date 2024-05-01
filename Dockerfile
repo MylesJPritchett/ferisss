@@ -20,7 +20,7 @@ COPY . .
 RUN cargo build --release
 
 # Create a new stage to create a smaller final image
-FROM debian:buster-slim
+FROM ubuntu:24.04
 
 # Set the working directory inside the container
 WORKDIR /usr/src/app
