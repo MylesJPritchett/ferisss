@@ -7,12 +7,6 @@ WORKDIR /usr/src/app
 # Copy the dependencies file
 COPY Cargo.toml Cargo.lock ./
 
-# Build the dependencies (this step allows Docker to cache the dependencies layer)
-RUN mkdir src && echo "fn main() {println!(\"if you see this, the build broke\")}" > src/main.rs && cargo build --release
-
-# Remove the dummy source file
-RUN rm -f src/main.rs
-
 # Copy the rest of the application source code
 COPY . .
 
