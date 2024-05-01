@@ -26,5 +26,5 @@ jobs:
           key: ${{ secrets.DO_SSH_KEY }}
           port: 22
           script: |
-            docker login -u mylesjpritchett -p secrets.DOCKER_TOKEN # If using private registry
+            docker login -u mylesjpritchett -p ${{secrets.DOCKER_TOKEN }} # If using private registry
             docker pull mylesjpritchett/ferisss:latest
