@@ -46,10 +46,10 @@ pub fn info() -> Value {
 
     return json!({
         "apiversion": "1",
-        "author": "MylesJPritchett", // TODO: Your Battlesnake Username
-        "color": "#FF5F1F", // TODO: Choose color
-        "head": "default", // TODO: Choose head
-        "tail": "default", // TODO: Choose tail
+        "author": "MylesJPritchett",
+        "color": "#FF5F1F",
+        "head": "default",
+        "tail": "default",
     });
 }
 
