@@ -1,311 +1,408 @@
-// Welcome to
-// __________         __    __  .__                               __
-// \______   \_____ _/  |__/  |_|  |   ____   ______ ____ _____  |  | __ ____
-//  |    |  _/\__  \\   __\   __\  | _/ __ \ /  ___//    \\__  \ |  |/ // __ \
-//  |    |   \ / __ \|  |  |  | |  |_\  ___/ \___ \|   |  \/ __ \|    <\  ___/
-//  |________/(______/__|  |__| |____/\_____>______>___|__(______/__|__\\_____>
-//
-// This file can be a nice home for your Battlesnake logic and helper functions.
-//
-// To get you started we've included code to prevent your Battlesnake from moving backwards.
-// For more info see docs.battlesnake.com
+use log::{debug, info};
+use serde::Serialize;
+use serde_json::{Value, json};
+use std::collections::HashSet;
 
-use log::info;
-use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use crate::api::{Board, Coord, GameState};
 
-use crate::{Battlesnake, Board, Coord, Game};
+/// One of the four directions the head can go this turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Move {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
-impl Coord {
-    fn neighbors(&self) -> [Coord; 4] {
-        [
-            Coord {
-                x: self.x,
-                y: self.y + 1,
+impl Move {
+    /// Every move, in the fixed order used whenever moves tie.
+    pub const ALL: [Move; 4] = [Move::Up, Move::Down, Move::Left, Move::Right];
+
+    /// The cell the head lands on after making this move.
+    pub fn landing_cell(self, head: Coord) -> Coord {
+        match self {
+            Move::Up => Coord {
+                x: head.x,
+                y: head.y + 1,
             },
-            Coord {
-                x: self.x,
-                y: self.y - 1,
+            Move::Down => Coord {
+                x: head.x,
+                y: head.y - 1,
             },
-            Coord {
-                x: self.x + 1,
-                y: self.y,
+            Move::Left => Coord {
+                x: head.x - 1,
+                y: head.y,
             },
-            Coord {
-                x: self.x - 1,
-                y: self.y,
+            Move::Right => Coord {
+                x: head.x + 1,
+                y: head.y,
             },
-        ]
+        }
     }
 }
-// info is called when you create your Battlesnake on play.battlesnake.com
-// and controls your Battlesnake's appearance
-// TIP: If you open your Battlesnake URL in a browser you should see this data
+
+#[derive(Debug, Serialize)]
+pub struct MoveResponse {
+    pub r#move: Move,
+}
+
 pub fn info() -> Value {
     info!("INFO");
 
-    return json!({
+    json!({
         "apiversion": "1",
         "author": "MylesJPritchett",
         "color": "#FF5F1F",
         "head": "default",
         "tail": "default",
-    });
+    })
 }
 
-// start is called when your Battlesnake begins a game
-pub fn start(_game: &Game, _turn: &i32, _board: &Board, _you: &Battlesnake) {
+pub fn start(_state: &GameState) {
     info!("GAME START");
 }
 
-// end is called when your Battlesnake finishes a game
-pub fn end(_game: &Game, _turn: &i32, _board: &Board, _you: &Battlesnake) {
+pub fn end(_state: &GameState) {
     info!("GAME OVER");
 }
 
-// move is called on every turn and returns your next move
-// Valid moves are "up", "down", "left", or "right"
-// See https://docs.battlesnake.com/api/example-move for available data
-pub fn get_move(_game: &Game, turn: &i32, board: &Board, you: &Battlesnake) -> Value {
-    println!("TURN {}", turn);
-    let mut is_move_safe: HashMap<_, _> = vec![
-        ("up", true),
-        ("down", true),
-        ("left", true),
-        ("right", true),
-    ]
-    .into_iter()
-    .collect();
-
-    // We've included code to prevent your Battlesnake from moving backwards
-    let my_head = &you.body[0]; // Coordinates of your head
-    let _my_neck = &you.body[1]; // Coordinates of your "neck"
-
-    // Step 1 - Prevent your Battlesnake from moving out of bounds
-    let board_width = &board.width;
-    let board_height = &board.height;
-    if my_head.x == 0 {
-        // Head is on left edge, don't move left
-        is_move_safe.insert("left", false);
-    } else if my_head.x == board_width - 1 {
-        // Head is on right edge, don't move right
-        is_move_safe.insert("right", false);
-    }
-
-    if my_head.y == 0 {
-        // Head is on bottom edge, don't move down
-        is_move_safe.insert("down", false);
-    } else if my_head.y == board_height - 1 {
-        // Head is on top edge, don't move up
-        is_move_safe.insert("up", false);
-    }
-
-    // Step 2 - Prevent your Battlesnake from colliding with itself
-    //
-    let lookers = HashMap::from([
-        (
-            Coord {
-                x: my_head.x,
-                y: my_head.y + 1,
-            },
-            "up",
-        ),
-        (
-            Coord {
-                x: my_head.x,
-                y: my_head.y - 1,
-            },
-            "down",
-        ),
-        (
-            Coord {
-                x: my_head.x - 1,
-                y: my_head.y,
-            },
-            "left",
-        ),
-        (
-            Coord {
-                x: my_head.x + 1,
-                y: my_head.y,
-            },
-            "right",
-        ),
-    ]);
-
-    let my_body = &you.body;
-
-    for body_part in my_body.iter() {
-        if lookers.contains_key(body_part) {
-            let direction = lookers.get(body_part).unwrap();
-            println!("Body part is in {:?}", direction);
-            is_move_safe.insert(direction, false);
-        }
-    }
-
-    // Step 3 - Prevent your Battlesnake from colliding with other Battlesnakes
-    let opponents = &board.snakes;
-    for oppponent in opponents {
-        let opponent_body = &oppponent.body;
-        for body_part in opponent_body {
-            if lookers.contains_key(body_part) {
-                let direction = lookers.get(body_part).unwrap();
-                println!("Body of opponent part is in {:?}", direction);
-                is_move_safe.insert(direction, false);
-            }
-        }
-    }
-    // Are there any safe moves left?
-    let safe_moves = is_move_safe
-        .into_iter()
-        .filter(|&(_, v)| v)
-        .map(|(k, _)| k)
-        .collect::<Vec<_>>();
-
-    // Choose a random move from the safe ones
-
-    // TODO: Step 4 - Move towards food instead of random, to regain health and survive longer
-    /*
-    impl Coord {
-        fn successors(&self) -> Vec<Coord> {
-            let &Coord(x, y) = self;
-            vec![
-                Coord(x, y + 1),
-                Coord(x, y - 1),
-                Coord(x - 1, y),
-                Coord(x + 1, y),
-            ]
-        }
-    }
-    let food = &board.food;
-    let result = bfs(&my_head, |p| p.successors(), |p| *p == food&food, &board);
-    */
-
-    let food = &board.food;
-    let food_distances: HashMap<&Coord, i32> = food
-        .iter()
-        .map(|food| {
-            (
-                food,
-                (food.x - my_head.x).abs() + (food.y - my_head.y).abs(),
-            )
-        })
-        .collect();
-
-    let closest_food = food_distances
-        .iter()
-        .min_by_key(|&(_, v)| v)
-        .map(|(k, _)| k)
-        .unwrap();
-    let mut desired_move = "left";
-
-    match closest_food {
-        Coord { x, y } => {
-            if *x < my_head.x {
-                // Food is left of head, move left
-                desired_move = "left";
-            } else if *x > my_head.x {
-                // Food is right of head, move right
-                desired_move = "right";
-            } else if *y < my_head.y {
-                // Food is below head, move down
-                desired_move = "down";
-            } else if *y > my_head.y {
-                // Food is above head, move up
-                desired_move = "up";
-            }
-        }
-    }
-    println!("Safe moves: {:?}", safe_moves);
-
-    if !safe_moves.is_empty() {
-        let mut max_count = 0;
-        let mut flood_fill_direction = HashMap::new();
-        for &safe_move in &safe_moves {
-            let count = match safe_move {
-                "up" => flood_fill_count(
-                    &board,
-                    &Coord {
-                        x: my_head.x,
-                        y: my_head.y + 1,
-                    },
-                ),
-                "down" => flood_fill_count(
-                    &board,
-                    &Coord {
-                        x: my_head.x,
-                        y: my_head.y - 1,
-                    },
-                ),
-                "left" => flood_fill_count(
-                    &board,
-                    &Coord {
-                        x: my_head.x - 1,
-                        y: my_head.y,
-                    },
-                ),
-                "right" => flood_fill_count(
-                    &board,
-                    &Coord {
-                        x: my_head.x + 1,
-                        y: my_head.y,
-                    },
-                ),
-                _ => {
-                    println!("Unknown direction");
-                    Ok(0) // Default to 0 in case of an unknown direction
-                }
-            };
-
-            if let Ok(count) = count {
-                flood_fill_direction.insert(safe_move, count);
-                max_count = max_count.max(count);
-            } else {
-                // Handle the error case if flood_fill_count returns an error
-                println!("Error calculating flood fill count");
-            }
-        }
-        println!("Flood fill counts: {:?}", flood_fill_direction);
-        // return a list of the moves with highest flood fill count
-        let best_moves: Vec<&str> = flood_fill_direction
-            .iter()
-            .filter_map(|(&dir, &count)| if count == max_count { Some(dir) } else { None })
-            .collect();
-        if best_moves.contains(&desired_move) {
-            println!("Desired move is safe");
-            json!({ "move": desired_move })
-        } else {
-            println!("Desired move is not safe");
-            json!({ "move": best_moves[0] })
-        }
-    } else {
-        println!("No safe moves");
-        json!({ "move": "up" })
-    }
+pub fn get_move(state: &GameState) -> MoveResponse {
+    info!("TURN {}", state.turn);
+    let chosen = choose_move(state);
+    info!("Chosen move: {chosen:?}");
+    MoveResponse { r#move: chosen }
 }
 
-fn flood_fill_count(board: &Board, start: &Coord) -> Result<i32, &'static str> {
-    let mut visited = HashSet::new();
-    visited.insert(start.clone());
+/// The move decision for a game state: space first, food second.
+pub fn choose_move(state: &GameState) -> Move {
+    let board = &state.board;
+    let head = state.you.body[0];
+    let food = nearest_food(board, head);
 
-    let mut frontier = vec![start.clone()];
+    let safe = safe_moves(board, head);
+    debug!("Safe moves: {safe:?}");
 
-    while !frontier.is_empty() {
-        let mut new_frontier = vec![];
+    // Best moves are empty only when there are no safe moves.
+    let best = best_moves(board, head, &safe);
+    debug!("Best moves: {best:?}");
+    let Some((&first, rest)) = best.split_first() else {
+        info!("No safe moves");
+        return Move::Up;
+    };
+    choose_among_best(first, rest, head, food)
+}
 
-        for coord in frontier {
-            let neighbors = coord.neighbors();
+/// Moves that don't leave the board or land on any snake's body, our own
+/// included (the board's snakes include us).
+fn safe_moves(board: &Board, head: Coord) -> Vec<Move> {
+    Move::ALL
+        .iter()
+        .copied()
+        .filter(|mv| {
+            let landing = mv.landing_cell(head);
+            board.contains(&landing) && !board.is_snake_body(&landing)
+        })
+        .collect()
+}
 
-            for neighbor in neighbors {
-                if !visited.contains(&neighbor) && board.is_empty(&neighbor) {
-                    new_frontier.push(neighbor.clone());
-                    visited.insert(neighbor);
-                }
+/// Cells reachable from where the move lands, without crossing the board
+/// edge, a snake's body or a hazard.
+fn space_after(board: &Board, head: Coord, mv: Move) -> usize {
+    let start = mv.landing_cell(head);
+    let mut visited = HashSet::from([start]);
+    let mut frontier = vec![start];
+
+    while let Some(cell) = frontier.pop() {
+        for neighbour in Move::ALL.map(|m| m.landing_cell(cell)) {
+            if board.is_free(&neighbour) && visited.insert(neighbour) {
+                frontier.push(neighbour);
+            }
+        }
+    }
+
+    visited.len()
+}
+
+/// The safe moves with the most space, in fixed move order.
+fn best_moves(board: &Board, head: Coord, safe: &[Move]) -> Vec<Move> {
+    let spaces: Vec<(Move, usize)> = safe
+        .iter()
+        .map(|&mv| (mv, space_after(board, head, mv)))
+        .collect();
+    debug!("Space: {spaces:?}");
+
+    let most = spaces.iter().map(|&(_, space)| space).max().unwrap_or(0);
+    spaces
+        .into_iter()
+        .filter(|&(_, space)| space == most)
+        .map(|(mv, _)| mv)
+        .collect()
+}
+
+/// The food with the smallest Manhattan distance from the head.
+fn nearest_food(board: &Board, head: Coord) -> Option<Coord> {
+    board
+        .food
+        .iter()
+        .min_by_key(|food| food.manhattan_distance(&head))
+        .copied()
+}
+
+/// Picks among the best moves, given as the first and the rest in fixed move
+/// order: the one whose landing cell is closest to the nearest food, with
+/// remaining ties (or no food at all) settled by fixed move order.
+fn choose_among_best(first: Move, rest: &[Move], head: Coord, food: Option<Coord>) -> Move {
+    let distance_to_food =
+        |mv: Move| food.map(|food| food.manhattan_distance(&mv.landing_cell(head)));
+    // Only a strictly closer move replaces the current pick, so fixed order
+    // breaks ties.
+    rest.iter().copied().fold(first, |chosen, mv| {
+        if distance_to_food(mv) < distance_to_food(chosen) {
+            mv
+        } else {
+            chosen
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{Battlesnake, Board, Game};
+    use std::collections::HashMap;
+
+    fn coord(x: i32, y: i32) -> Coord {
+        Coord { x, y }
+    }
+
+    fn coords(cells: &[(i32, i32)]) -> Vec<Coord> {
+        cells.iter().map(|&(x, y)| coord(x, y)).collect()
+    }
+
+    /// Test-only builder for a game state seen from our snake.
+    struct BoardBuilder {
+        width: i32,
+        height: i32,
+        you: Vec<Coord>,
+        opponents: Vec<Vec<Coord>>,
+        food: Vec<Coord>,
+        hazards: Vec<Coord>,
+    }
+
+    fn board(width: i32, height: i32) -> BoardBuilder {
+        BoardBuilder {
+            width,
+            height,
+            you: vec![],
+            opponents: vec![],
+            food: vec![],
+            hazards: vec![],
+        }
+    }
+
+    fn snake(id: &str, body: Vec<Coord>) -> Battlesnake {
+        Battlesnake {
+            id: id.to_string(),
+            name: id.to_string(),
+            health: 100,
+            head: body[0],
+            length: body.len() as i32,
+            body,
+            latency: "0".to_string(),
+            shout: None,
+        }
+    }
+
+    impl BoardBuilder {
+        fn you(mut self, body: &[(i32, i32)]) -> Self {
+            self.you = coords(body);
+            self
+        }
+
+        fn opponent(mut self, body: &[(i32, i32)]) -> Self {
+            self.opponents.push(coords(body));
+            self
+        }
+
+        fn food(mut self, x: i32, y: i32) -> Self {
+            self.food.push(coord(x, y));
+            self
+        }
+
+        fn hazard(mut self, x: i32, y: i32) -> Self {
+            self.hazards.push(coord(x, y));
+            self
+        }
+
+        fn state(self) -> GameState {
+            let mut snakes = vec![snake("you", self.you.clone())];
+            for (i, body) in self.opponents.into_iter().enumerate() {
+                snakes.push(snake(&format!("opponent-{i}"), body));
+            }
+            GameState {
+                game: Game {
+                    id: "game".to_string(),
+                    ruleset: HashMap::new(),
+                    timeout: 500,
+                },
+                turn: 0,
+                board: Board {
+                    width: self.width,
+                    height: self.height,
+                    food: self.food,
+                    snakes,
+                    hazards: self.hazards,
+                },
+                you: snake("you", self.you),
             }
         }
 
-        frontier = new_frontier;
+        fn chosen_move(self) -> Move {
+            choose_move(&self.state())
+        }
     }
 
-    Ok(visited.len() as i32)
+    #[test]
+    fn never_leaves_the_board_from_any_corner() {
+        // Body runs along one edge from each corner, leaving one safe move.
+        let cases = [
+            (&[(0, 0), (1, 0), (2, 0)], Move::Up),
+            (&[(0, 4), (0, 3), (0, 2)], Move::Right),
+            (&[(4, 4), (3, 4), (2, 4)], Move::Down),
+            (&[(4, 0), (4, 1), (4, 2)], Move::Left),
+        ];
+        for (body, expected) in cases {
+            assert_eq!(board(5, 5).you(body).chosen_move(), expected, "{body:?}");
+        }
+    }
+
+    #[test]
+    fn never_leaves_the_board_from_any_edge() {
+        // Head mid-edge with no food. Every safe move leads into a one-cell
+        // pocket, the same space an off-board landing cell would get, so
+        // without the edge check the off-board move would win on fixed order.
+        let top = board(5, 5)
+            .you(&[(2, 4), (2, 3), (2, 2)])
+            .opponent(&[(1, 3), (0, 3), (0, 4)])
+            .opponent(&[(3, 3), (4, 3), (4, 4)]);
+        let bottom = board(5, 5)
+            .you(&[(2, 0), (2, 1), (2, 2)])
+            .opponent(&[(1, 1), (0, 1), (0, 0)])
+            .opponent(&[(3, 1), (4, 1), (4, 0)]);
+        let left = board(5, 5)
+            .you(&[(0, 2), (0, 3), (0, 4)])
+            .opponent(&[(0, 1), (1, 1)])
+            .opponent(&[(1, 3), (2, 3), (2, 2)]);
+        // Right is last in fixed order, so it can only win when it is the
+        // sole move left; with the edge check there are no safe moves.
+        let right = board(5, 5)
+            .you(&[(4, 2), (4, 3), (4, 4)])
+            .opponent(&[(4, 1), (3, 1)])
+            .opponent(&[(3, 2), (2, 2)]);
+
+        assert_eq!(top.chosen_move(), Move::Left);
+        assert_eq!(bottom.chosen_move(), Move::Left);
+        assert_eq!(left.chosen_move(), Move::Right);
+        assert_eq!(right.chosen_move(), Move::Up);
+    }
+
+    #[test]
+    fn never_moves_into_its_own_body() {
+        // Head in the middle, body wraps above and to the right.
+        let chosen = board(5, 5)
+            .you(&[(2, 2), (2, 3), (3, 3), (3, 2), (3, 1)])
+            .food(4, 4)
+            .chosen_move();
+        assert!(matches!(chosen, Move::Down | Move::Left));
+    }
+
+    #[test]
+    fn never_moves_into_an_opponents_body() {
+        // Food lies to the right, but an opponent's body blocks that way.
+        let chosen = board(5, 5)
+            .you(&[(0, 2), (0, 1), (0, 0)])
+            .opponent(&[(1, 2), (2, 2), (3, 2)])
+            .food(4, 2)
+            .chosen_move();
+        assert_eq!(chosen, Move::Up);
+    }
+
+    #[test]
+    fn picks_more_space_over_a_pocket_smaller_than_itself_even_with_food_in_it() {
+        // Moving left enters a three-cell pocket holding the food; the snake is
+        // four long, so it keeps to the open side instead. Up and right reach
+        // the same space and the same distance to the food, so up wins.
+        let chosen = board(5, 5)
+            .you(&[(2, 3), (2, 2), (2, 1), (2, 0)])
+            .opponent(&[(1, 2), (0, 2), (0, 1)])
+            .opponent(&[(1, 4)])
+            .food(0, 3)
+            .chosen_move();
+        assert_eq!(chosen, Move::Up);
+    }
+
+    #[test]
+    fn takes_the_move_towards_food_when_space_ties() {
+        let chosen = board(7, 7)
+            .you(&[(3, 3), (3, 2), (3, 1)])
+            .food(0, 3)
+            .chosen_move();
+        assert_eq!(chosen, Move::Left);
+    }
+
+    #[test]
+    fn follows_the_fixed_move_order_when_there_is_no_food() {
+        // Up is blocked by its own body; down, left and right tie on space.
+        let chosen = board(5, 5).you(&[(2, 2), (2, 3), (2, 4)]).chosen_move();
+        assert_eq!(chosen, Move::Down);
+    }
+
+    #[test]
+    fn moves_towards_food_on_the_y_axis_when_x_is_aligned() {
+        // Food directly below; up, down and left tie on space.
+        let chosen = board(7, 7)
+            .you(&[(3, 3), (4, 3), (5, 3)])
+            .food(3, 0)
+            .chosen_move();
+        assert_eq!(chosen, Move::Down);
+    }
+
+    #[test]
+    fn breaks_ties_in_fixed_move_order_when_food_is_diagonal() {
+        // Food is up and to the left: up and left tie on space and on distance
+        // to the nearest food, so up wins, on every call.
+        let state = board(7, 7)
+            .you(&[(3, 3), (3, 2), (3, 1)])
+            .food(0, 6)
+            .state();
+        assert_eq!(choose_move(&state), Move::Up);
+        assert_eq!(choose_move(&state), Move::Up);
+    }
+
+    #[test]
+    fn moves_up_when_there_are_no_safe_moves() {
+        let chosen = board(3, 3)
+            .you(&[(0, 0), (0, 1), (1, 1), (1, 0)])
+            .opponent(&[(2, 2), (2, 1), (2, 0)])
+            .food(2, 2)
+            .chosen_move();
+        assert_eq!(chosen, Move::Up);
+    }
+
+    #[test]
+    fn hazards_count_against_space() {
+        // Both up and down are open; hazards fill the cells above, so going
+        // down reaches more space even though the food is above.
+        let chosen = board(3, 5)
+            .you(&[(1, 2), (2, 2), (2, 1)])
+            .hazard(0, 4)
+            .hazard(1, 4)
+            .hazard(2, 4)
+            .hazard(0, 3)
+            .hazard(2, 3)
+            .food(1, 3)
+            .chosen_move();
+        assert_eq!(chosen, Move::Down);
+    }
 }

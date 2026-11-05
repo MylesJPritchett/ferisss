@@ -1,5 +1,7 @@
 # ferisss
 
+[![CI](https://github.com/MylesJPritchett/ferisss/actions/workflows/ci.yml/badge.svg)](https://github.com/MylesJPritchett/ferisss/actions/workflows/ci.yml)
+
 A [Battlesnake](https://play.battlesnake.com) written in Rust: a small HTTP server that gets the game state each turn and decides where to move. It avoids trapping itself by measuring the open space behind each possible move.
 
 <!--
@@ -12,41 +14,42 @@ A [Battlesnake](https://play.battlesnake.com) written in Rust: a small HTTP serv
 
 <!-- LIVE: if the snake is registered on play.battlesnake.com, link its profile page here. -->
 
+The snake isn't currently deployed. Deploys are manual (see "Container deploy" below).
+
 ## What it does
 
 - Never moves off the board or into its own body or another snake's body.
 - Each turn, measures how much open board can be reached from each safe move, and only chooses among the moves with the most space.
-- Heads for the nearest food when that keeps it in the most space, and gives up the food when it doesn't.
+- Among the moves with the most space, heads for the nearest food, and gives up the food when that would cost space.
+- Breaks any remaining tie in a fixed order (up, down, left, right), so the same board always gets the same move.
 - Runs as a stateless server, so it can play several games at the same time.
 
-ferisss started from the official [Battlesnake Rust starter](https://github.com/BattlesnakeOfficial/starter-snake-rust), which provides the Rocket server and the API types. Everything in `src/logic.rs` beyond the starter's boundary check is my own work (body and opponent avoidance, flood fill, food selection), as are the Docker image and the CI deployment.
+ferisss started from the official [Battlesnake Rust starter](https://github.com/BattlesnakeOfficial/starter-snake-rust), which provides the Rocket server and the API types. Everything in `src/logic.rs` beyond the starter's boundary check is my own work (body and opponent avoidance, flood fill, food selection, tie-breaking), as are the module split, the tests, the Docker image and the CI and deploy workflows.
 
 ## How it works
 
-The Battlesnake engine sends `POST /move` with the full board as JSON once per turn, and the snake must reply within the game's timeout (500 ms by default). `src/main.rs` deserialises the board into `GameState` with serde and hands it to `logic::get_move`, which runs three passes:
+The Battlesnake engine sends `POST /move` with the full board as JSON once per turn, and the snake must reply within the game's timeout (500 ms by default). `src/main.rs` deserialises the board into `GameState` (the API types live in `src/api.rs`) with serde and hands it to `logic::get_move`, which runs three passes:
 
-1. **Filter.** Start with up/down/left/right and remove any move that leaves the board or lands on a snake body (its own or another snake's).
-2. **Score by space.** For each remaining move, run a breadth-first flood fill (`flood_fill_count`) from the target cell. Every cell it can reach without crossing a wall, a snake body or a hazard adds to that move's count.
-3. **Pick.** Keep only the moves with the highest count. If the move toward the nearest food (by Manhattan distance) is among them, take it. Otherwise take one of the best-space moves.
+1. **Filter.** Start with up/down/left/right and remove any move that leaves the board or lands on a snake body (its own or another snake's). If nothing is left, it moves up.
+2. **Score by space.** For each remaining move, run a flood fill (`space_after`) from the landing cell. Every cell it can reach without crossing a wall, a snake body or a hazard adds to that move's count.
+3. **Pick.** Keep only the moves with the highest count. Among those, take the one whose landing cell is closest (by Manhattan distance) to the nearest food. Any tie left over, or every tie when there's no food, goes to the first move in the fixed order up, down, left, right.
 
 Some decisions worth calling out:
 
 - **Space first, food second.** Checking only one step ahead isn't enough. A cell can be safe this turn and still lead into a pocket smaller than the snake, and a snake that goes straight for food will walk into those pockets. Ranking moves by the size of the area they lead to prevents that. Food only breaks ties, so the snake chooses survival over growth.
-- **Flood fill rather than pathfinding.** A shortest path to food (there's a commented-out BFS sketch in `get_move`) tells you how to reach the food, not whether you can get out afterwards. Counting reachable cells answers the question that actually kills snakes, and it's cheap on an 11×11 board: at most 121 cells for each of four candidate moves. The visited set is a `HashSet<Coord>`, which is why `Coord` derives `Hash`/`Eq`.
-- **Container deploy.** A two-stage Dockerfile compiles in `rust:latest` and copies only the release binary into `ubuntu:24.04`. On every push to `main`, a GitHub Actions workflow builds the image, pushes it to Docker Hub, and pulls it onto a DigitalOcean Droplet over SSH.
+- **Deterministic ties.** Moves are always considered in the same order, and the first of any equal options wins. The same board always produces the same move, which keeps games reproducible and the tests exact.
+- **Flood fill rather than pathfinding.** A shortest path to food tells you how to reach the food, not whether you can get out afterwards. Counting reachable cells answers the question that actually kills snakes, and it's cheap on an 11×11 board: at most 121 cells for each of four candidate moves. The visited set is a `HashSet<Coord>`, which is why `Coord` derives `Hash`/`Eq`.
+- **Container deploy.** A two-stage Dockerfile compiles in `rust:1-bookworm` and copies only the release binary and `Rocket.toml` into `debian:bookworm-slim`, where it runs as a non-root user. The deploy workflow is run by hand (`workflow_dispatch`): it builds the image, pushes it to Docker Hub, then over SSH pulls it onto a DigitalOcean Droplet and replaces the running container. A separate CI workflow runs `cargo fmt --check`, `cargo clippy` with warnings as errors, and `cargo test` on every push and pull request.
 
 ### Known limitations
 
-- If the board has no food, `get_move` panics on `unwrap()` and the request returns a 500. The engine then moves the snake for it.
-- Snake tails are treated as permanently blocked, even though they move away next turn. Hazards are treated as walls. Both make the flood fill pessimistic.
+- Snake tails are treated as permanently blocked, even though they move away next turn. Hazards are treated as walls when measuring space. Both make the flood fill pessimistic.
+- A move onto a hazard is still allowed, and its landing cell still counts as one cell of space. So the flood fill is optimistic there, the one place it isn't pessimistic.
 - It doesn't predict opponents' heads, so it can walk into a head-to-head collision with a longer snake.
-- When several moves tie, the choice depends on `HashMap` iteration order rather than an explicit rule.
-- The deploy workflow pulls the new image but doesn't restart the running container.
-- There are no automated tests yet.
 
 ## Stack
 
-Rust (2018 edition), [Rocket 0.5](https://rocket.rs) for HTTP, serde/serde_json for the API types, env_logger for logging, Docker, GitHub Actions, and a DigitalOcean Droplet.
+Rust (2024 edition), [Rocket 0.5](https://rocket.rs) for HTTP, serde/serde_json for the API types, env_logger for logging, Docker, GitHub Actions, and a DigitalOcean Droplet.
 
 ## Running locally
 
@@ -62,10 +65,10 @@ With Docker:
 
 ```sh
 docker build -t ferisss .
-docker run --rm -p 8000:8000 -e ROCKET_ADDRESS=0.0.0.0 ferisss
+docker run --rm -p 8000:8000 ferisss
 ```
 
-`ROCKET_ADDRESS` is needed because the runtime image contains only the binary, not `Rocket.toml`, so Rocket otherwise binds to `127.0.0.1` inside the container.
+The image includes `Rocket.toml`, which binds to `0.0.0.0`, so no extra environment is needed.
 
 ### Play a local game
 
@@ -81,4 +84,4 @@ battlesnake play -W 11 -H 11 --name ferisss --url http://localhost:8000 -g solo 
 cargo test
 ```
 
-The crate has no tests yet, so this only checks that it compiles.
+The move tests in `src/logic.rs` build small boards with a test-only builder and check the move `choose_move` picks: never leaving the board from any corner or edge, never entering its own or an opponent's body, avoiding a pocket smaller than itself even with food in it, heading for food when space ties, treating hazards as lost space, and breaking ties in the fixed order. The server tests in `src/main.rs` check the `Server` header and that `PORT` overrides the default port of 8000. CI runs the same suite alongside `cargo fmt --check` and `cargo clippy`.

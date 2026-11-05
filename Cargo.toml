@@ -2,16 +2,14 @@
 authors = ["Myles Pritchett"]
 name = "ferisss"
 version = "1.0.0"
-edition = "2018"
+edition = "2024"
 
-homepage = "https://play.battlesnake.com"
-repository = "https://github.com/BattlesnakeOfficial/starter-snake-rust/"
+repository = "https://github.com/MylesJPritchett/ferisss"
+license = "MIT"
 
 readme = "README.md"
-keywords = ["battlesnake"]
-description = """
-A simple Battlesnake written in Rust
-"""
+keywords = ["battlesnake", "game-ai", "flood-fill", "rocket"]
+description = "A Battlesnake that picks moves by measuring the open space behind each one"
 
 [dependencies]
 rocket = { version = "0.5.0", features = ["json"] }
@@ -19,4 +17,3 @@ serde = { version = "1.0.117", features = ["derive"] }
 serde_json = "1.0.59"
 log = "0.4.0"
 env_logger = "0.9.0"
-rand = "0.8.4"
