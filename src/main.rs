@@ -4,85 +4,15 @@ extern crate rocket;
 use log::info;
 use rocket::fairing::AdHoc;
 use rocket::http::Status;
-use rocket::serde::{json::Json, Deserialize};
-use serde::Serialize;
+use rocket::serde::json::Json;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::env;
 
+mod api;
 mod logic;
 
-// API and Response Objects
-// See https://docs.battlesnake.com/api
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Game {
-    id: String,
-    ruleset: HashMap<String, Value>,
-    timeout: u32,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Board {
-    height: i32,
-    width: i32,
-    food: Vec<Coord>,
-    snakes: Vec<Battlesnake>,
-    hazards: Vec<Coord>,
-}
-impl Board {
-    fn is_empty(&self, coord: &Coord) -> bool {
-        // Check if the cell is within the board boundaries
-        if coord.x < 0 || coord.x >= self.width || coord.y < 0 || coord.y >= self.height {
-            return false;
-        }
-
-        // Check if the cell is not occupied by a snake or other obstacles
-        !self.is_snake_body(coord) && !self.is_obstacle(coord)
-    }
-
-    // Check if a cell is occupied by a snake body
-    fn is_snake_body(&self, coord: &Coord) -> bool {
-        // Logic to check if the cell is part of a snake's body
-        // Implementation depends on the structure of your Board
-        // For example, you might have a vector of snake bodies
-        self.snakes.iter().any(|snake| snake.body.contains(coord))
-    }
-
-    // Check if a cell is an obstacle (e.g., a wall)
-    fn is_obstacle(&self, coord: &Coord) -> bool {
-        // Logic to check if the cell is an obstacle
-        // Implementation depends on the structure of your Board
-        // For example, you might have a vector of obstacle coordinates
-        self.hazards.contains(coord)
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Battlesnake {
-    id: String,
-    name: String,
-    health: i32,
-    body: Vec<Coord>,
-    head: Coord,
-    length: i32,
-    latency: String,
-    shout: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Clone)]
-pub struct Coord {
-    x: i32,
-    y: i32,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct GameState {
-    game: Game,
-    turn: i32,
-    board: Board,
-    you: Battlesnake,
-}
+use api::GameState;
+use logic::MoveResponse;
 
 #[get("/")]
 fn handle_index() -> Json<Value> {
@@ -91,46 +21,29 @@ fn handle_index() -> Json<Value> {
 
 #[post("/start", format = "json", data = "<start_req>")]
 fn handle_start(start_req: Json<GameState>) -> Status {
-    logic::start(
-        &start_req.game,
-        &start_req.turn,
-        &start_req.board,
-        &start_req.you,
-    );
-
+    logic::start(&start_req);
     Status::Ok
 }
 
 #[post("/move", format = "json", data = "<move_req>")]
-fn handle_move(move_req: Json<GameState>) -> Json<Value> {
-    let response = logic::get_move(
-        &move_req.game,
-        &move_req.turn,
-        &move_req.board,
-        &move_req.you,
-    );
-
-    Json(response)
+fn handle_move(move_req: Json<GameState>) -> Json<MoveResponse> {
+    Json(logic::get_move(&move_req))
 }
 
 #[post("/end", format = "json", data = "<end_req>")]
 fn handle_end(end_req: Json<GameState>) -> Status {
-    logic::end(&end_req.game, &end_req.turn, &end_req.board, &end_req.you);
-
+    logic::end(&end_req);
     Status::Ok
 }
 
 #[launch]
 fn rocket() -> _ {
-    // Lots of web hosting services expect you to bind to the port specified by the `PORT`
-    // environment variable. However, Rocket looks at the `ROCKET_PORT` environment variable.
-    // If we find a value for `PORT`, we set `ROCKET_PORT` to that value.
+    // Hosting platforms set `PORT`, but Rocket reads `ROCKET_PORT`.
     if let Ok(port) = env::var("PORT") {
         env::set_var("ROCKET_PORT", &port);
     }
 
-    // We default to 'info' level logging. But if the `RUST_LOG` environment variable is set,
-    // we keep that value instead.
+    // Default to info-level logging unless `RUST_LOG` is already set.
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", "info");
     }
