@@ -31,8 +31,8 @@ ferisss started from the official [Battlesnake Rust starter](https://github.com/
 The Battlesnake engine sends `POST /move` with the full board as JSON once per turn, and the snake must reply within the game's timeout (500 ms by default). `src/main.rs` deserialises the board into `GameState` (the API types live in `src/api.rs`) with serde and hands it to `logic::get_move`, which runs three passes:
 
 1. **Filter.** Start with up/down/left/right and remove any move that leaves the board or lands on a snake body (its own or another snake's). If nothing is left, it moves up.
-2. **Score by space.** For each remaining move, run a flood fill (`space_after`) from the target cell. Every cell it can reach without crossing a wall, a snake body or a hazard adds to that move's count.
-3. **Pick.** Keep only the moves with the highest count. Among those, take the one whose target cell is closest (by Manhattan distance) to the nearest food. Any tie left over, or every tie when there's no food, goes to the first move in the fixed order up, down, left, right.
+2. **Score by space.** For each remaining move, run a flood fill (`space_after`) from the landing cell. Every cell it can reach without crossing a wall, a snake body or a hazard adds to that move's count.
+3. **Pick.** Keep only the moves with the highest count. Among those, take the one whose landing cell is closest (by Manhattan distance) to the nearest food. Any tie left over, or every tie when there's no food, goes to the first move in the fixed order up, down, left, right.
 
 Some decisions worth calling out:
 
@@ -44,6 +44,7 @@ Some decisions worth calling out:
 ### Known limitations
 
 - Snake tails are treated as permanently blocked, even though they move away next turn. Hazards are treated as walls when measuring space. Both make the flood fill pessimistic.
+- A move onto a hazard is still allowed, and its landing cell still counts as one cell of space. So the flood fill is optimistic there, the one place it isn't pessimistic.
 - It doesn't predict opponents' heads, so it can walk into a head-to-head collision with a longer snake.
 
 ## Stack

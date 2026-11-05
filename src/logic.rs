@@ -19,23 +19,24 @@ impl Move {
     /// Every move, in the fixed order used whenever moves tie.
     pub const ALL: [Move; 4] = [Move::Up, Move::Down, Move::Left, Move::Right];
 
-    pub fn step(self, from: Coord) -> Coord {
+    /// The cell the head lands on after making this move.
+    pub fn landing_cell(self, head: Coord) -> Coord {
         match self {
             Move::Up => Coord {
-                x: from.x,
-                y: from.y + 1,
+                x: head.x,
+                y: head.y + 1,
             },
             Move::Down => Coord {
-                x: from.x,
-                y: from.y - 1,
+                x: head.x,
+                y: head.y - 1,
             },
             Move::Left => Coord {
-                x: from.x - 1,
-                y: from.y,
+                x: head.x - 1,
+                y: head.y,
             },
             Move::Right => Coord {
-                x: from.x + 1,
-                y: from.y,
+                x: head.x + 1,
+                y: head.y,
             },
         }
     }
@@ -79,30 +80,28 @@ pub fn choose_move(state: &GameState) -> Move {
     let head = state.you.body[0];
     let food = nearest_food(board, head);
 
-    let safe = safe_moves(state);
+    let safe = safe_moves(board, head);
     debug!("Safe moves: {safe:?}");
-    if safe.is_empty() {
-        info!("No safe moves");
-        return Move::Up;
-    }
 
+    // Best moves are empty only when there are no safe moves.
     let best = best_moves(board, head, &safe);
     debug!("Best moves: {best:?}");
-    choose_among_best(&best, head, food)
+    let Some((&first, rest)) = best.split_first() else {
+        info!("No safe moves");
+        return Move::Up;
+    };
+    choose_among_best(first, rest, head, food)
 }
 
-/// Moves that don't leave the board or land on any snake's body.
-fn safe_moves(state: &GameState) -> Vec<Move> {
-    let board = &state.board;
-    let head = state.you.body[0];
+/// Moves that don't leave the board or land on any snake's body, our own
+/// included (the board's snakes include us).
+fn safe_moves(board: &Board, head: Coord) -> Vec<Move> {
     Move::ALL
         .iter()
         .copied()
         .filter(|mv| {
-            let target = mv.step(head);
-            board.contains(&target)
-                && !board.is_snake_body(&target)
-                && !state.you.body.contains(&target)
+            let landing = mv.landing_cell(head);
+            board.contains(&landing) && !board.is_snake_body(&landing)
         })
         .collect()
 }
@@ -110,12 +109,12 @@ fn safe_moves(state: &GameState) -> Vec<Move> {
 /// Cells reachable from where the move lands, without crossing the board
 /// edge, a snake's body or a hazard.
 fn space_after(board: &Board, head: Coord, mv: Move) -> usize {
-    let start = mv.step(head);
+    let start = mv.landing_cell(head);
     let mut visited = HashSet::from([start]);
     let mut frontier = vec![start];
 
     while let Some(cell) = frontier.pop() {
-        for neighbour in Move::ALL.map(|m| m.step(cell)) {
+        for neighbour in Move::ALL.map(|m| m.landing_cell(cell)) {
             if board.is_free(&neighbour) && visited.insert(neighbour) {
                 frontier.push(neighbour);
             }
@@ -150,16 +149,21 @@ fn nearest_food(board: &Board, head: Coord) -> Option<Coord> {
         .copied()
 }
 
-/// Picks among the best moves: the one whose landing cell is closest to the
-/// nearest food, with remaining ties (or no food at all) settled by fixed
-/// move order.
-fn choose_among_best(best: &[Move], head: Coord, food: Option<Coord>) -> Move {
-    let distance_to_food = |mv: &Move| food.map(|food| food.manhattan_distance(&mv.step(head)));
-    // `min_by_key` keeps the first of equal keys, so fixed order breaks ties.
-    best.iter()
-        .copied()
-        .min_by_key(distance_to_food)
-        .unwrap_or(Move::Up)
+/// Picks among the best moves, given as the first and the rest in fixed move
+/// order: the one whose landing cell is closest to the nearest food, with
+/// remaining ties (or no food at all) settled by fixed move order.
+fn choose_among_best(first: Move, rest: &[Move], head: Coord, food: Option<Coord>) -> Move {
+    let distance_to_food =
+        |mv: Move| food.map(|food| food.manhattan_distance(&mv.landing_cell(head)));
+    // Only a strictly closer move replaces the current pick, so fixed order
+    // breaks ties.
+    rest.iter().copied().fold(first, |chosen, mv| {
+        if distance_to_food(mv) < distance_to_food(chosen) {
+            mv
+        } else {
+            chosen
+        }
+    })
 }
 
 #[cfg(test)]
@@ -168,8 +172,12 @@ mod tests {
     use crate::api::{Battlesnake, Board, Game};
     use std::collections::HashMap;
 
-    fn c(x: i32, y: i32) -> Coord {
+    fn coord(x: i32, y: i32) -> Coord {
         Coord { x, y }
+    }
+
+    fn coords(cells: &[(i32, i32)]) -> Vec<Coord> {
+        cells.iter().map(|&(x, y)| coord(x, y)).collect()
     }
 
     /// Test-only builder for a game state seen from our snake.
@@ -208,23 +216,22 @@ mod tests {
 
     impl BoardBuilder {
         fn you(mut self, body: &[(i32, i32)]) -> Self {
-            self.you = body.iter().map(|&(x, y)| c(x, y)).collect();
+            self.you = coords(body);
             self
         }
 
         fn opponent(mut self, body: &[(i32, i32)]) -> Self {
-            self.opponents
-                .push(body.iter().map(|&(x, y)| c(x, y)).collect());
+            self.opponents.push(coords(body));
             self
         }
 
         fn food(mut self, x: i32, y: i32) -> Self {
-            self.food.push(c(x, y));
+            self.food.push(coord(x, y));
             self
         }
 
         fn hazard(mut self, x: i32, y: i32) -> Self {
-            self.hazards.push(c(x, y));
+            self.hazards.push(coord(x, y));
             self
         }
 
@@ -272,21 +279,32 @@ mod tests {
 
     #[test]
     fn never_leaves_the_board_from_any_edge() {
-        // Head mid-edge with no food, and every move ahead of the off-board
-        // one in fixed order blocked, so only the edge check stops it.
-        let top = board(5, 5).you(&[(2, 4), (2, 3), (2, 2)]);
-        let bottom = board(5, 5).you(&[(2, 0), (2, 1), (2, 2)]);
+        // Head mid-edge with no food. Every safe move leads into a one-cell
+        // pocket, the same space an off-board landing cell would get, so
+        // without the edge check the off-board move would win on fixed order.
+        let top = board(5, 5)
+            .you(&[(2, 4), (2, 3), (2, 2)])
+            .opponent(&[(1, 3), (0, 3), (0, 4)])
+            .opponent(&[(3, 3), (4, 3), (4, 4)]);
+        let bottom = board(5, 5)
+            .you(&[(2, 0), (2, 1), (2, 2)])
+            .opponent(&[(1, 1), (0, 1), (0, 0)])
+            .opponent(&[(3, 1), (4, 1), (4, 0)]);
         let left = board(5, 5)
             .you(&[(0, 2), (0, 3), (0, 4)])
-            .opponent(&[(0, 1), (0, 0)]);
+            .opponent(&[(0, 1), (1, 1)])
+            .opponent(&[(1, 3), (2, 3), (2, 2)]);
+        // Right is last in fixed order, so it can only win when it is the
+        // sole move left; with the edge check there are no safe moves.
         let right = board(5, 5)
             .you(&[(4, 2), (4, 3), (4, 4)])
-            .opponent(&[(4, 1), (4, 0)]);
+            .opponent(&[(4, 1), (3, 1)])
+            .opponent(&[(3, 2), (2, 2)]);
 
         assert_eq!(top.chosen_move(), Move::Left);
         assert_eq!(bottom.chosen_move(), Move::Left);
         assert_eq!(left.chosen_move(), Move::Right);
-        assert_eq!(right.chosen_move(), Move::Left);
+        assert_eq!(right.chosen_move(), Move::Up);
     }
 
     #[test]
@@ -313,14 +331,15 @@ mod tests {
     #[test]
     fn picks_more_space_over_a_pocket_smaller_than_itself_even_with_food_in_it() {
         // Moving left enters a three-cell pocket holding the food; the snake is
-        // four long, so it keeps to the open side instead.
+        // four long, so it keeps to the open side instead. Up and right reach
+        // the same space and the same distance to the food, so up wins.
         let chosen = board(5, 5)
             .you(&[(2, 3), (2, 2), (2, 1), (2, 0)])
             .opponent(&[(1, 2), (0, 2), (0, 1)])
             .opponent(&[(1, 4)])
             .food(0, 3)
             .chosen_move();
-        assert_ne!(chosen, Move::Left);
+        assert_eq!(chosen, Move::Up);
     }
 
     #[test]
