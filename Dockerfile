@@ -1,29 +1,25 @@
-# Use the official Rust image as the base image
-FROM rust:latest as builder
+# Build stage: bookworm matches the runtime's glibc
+FROM rust:1-bookworm AS builder
 
-# Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy the dependencies file
-COPY Cargo.toml Cargo.lock ./
-
-# Copy the rest of the application source code
 COPY . .
 
-# Build the application
 RUN cargo build --release
 
-# Create a new stage to create a smaller final image
-FROM ubuntu:24.04
+# Runtime stage
+FROM debian:bookworm-slim
 
-# Set the working directory inside the container
-WORKDIR /usr/src/app
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin ferisss
 
-# Copy the built executable from the builder stage
-COPY --from=builder /usr/src/app/target/release/ferisss .
+WORKDIR /app
 
-# Expose the port that your Rocket application will run on
+COPY --from=builder /usr/src/app/target/release/ferisss ./ferisss
+# Rocket.toml sets address = 0.0.0.0, so no ROCKET_ADDRESS is needed
+COPY Rocket.toml ./
+
+USER ferisss
+
 EXPOSE 8000
 
-# Command to run the application
 CMD ["./ferisss"]
