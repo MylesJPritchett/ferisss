@@ -77,7 +77,7 @@ pub fn get_move(state: &GameState) -> MoveResponse {
 pub fn choose_move(state: &GameState) -> Move {
     let board = &state.board;
     let head = state.you.body[0];
-    let food = nearest_food(board, head).expect("board has no food");
+    let food = nearest_food(board, head);
 
     let safe = safe_moves(state);
     debug!("Safe moves: {safe:?}");
@@ -150,26 +150,16 @@ fn nearest_food(board: &Board, head: Coord) -> Option<Coord> {
         .copied()
 }
 
-/// Picks among the best moves: the move heading for the nearest food (x-axis
-/// first) when it is one of them, otherwise the first best move.
-fn choose_among_best(best: &[Move], head: Coord, food: Coord) -> Move {
-    let towards_food = if food.x < head.x {
-        Move::Left
-    } else if food.x > head.x {
-        Move::Right
-    } else if food.y < head.y {
-        Move::Down
-    } else if food.y > head.y {
-        Move::Up
-    } else {
-        Move::Left
-    };
-
-    if best.contains(&towards_food) {
-        towards_food
-    } else {
-        best[0]
-    }
+/// Picks among the best moves: the one whose landing cell is closest to the
+/// nearest food, with remaining ties (or no food at all) settled by fixed
+/// move order.
+fn choose_among_best(best: &[Move], head: Coord, food: Option<Coord>) -> Move {
+    let distance_to_food = |mv: &Move| food.map(|food| food.manhattan_distance(&mv.step(head)));
+    // `min_by_key` keeps the first of equal keys, so fixed order breaks ties.
+    best.iter()
+        .copied()
+        .min_by_key(distance_to_food)
+        .unwrap_or(Move::Up)
 }
 
 #[cfg(test)]
@@ -267,12 +257,36 @@ mod tests {
     }
 
     #[test]
-    fn never_leaves_the_board_from_a_corner() {
-        let chosen = board(5, 5)
-            .you(&[(0, 0), (1, 0), (2, 0)])
-            .food(4, 4)
-            .chosen_move();
-        assert_eq!(chosen, Move::Up);
+    fn never_leaves_the_board_from_any_corner() {
+        // Body runs along one edge from each corner, leaving one safe move.
+        let cases = [
+            (&[(0, 0), (1, 0), (2, 0)], Move::Up),
+            (&[(0, 4), (0, 3), (0, 2)], Move::Right),
+            (&[(4, 4), (3, 4), (2, 4)], Move::Down),
+            (&[(4, 0), (4, 1), (4, 2)], Move::Left),
+        ];
+        for (body, expected) in cases {
+            assert_eq!(board(5, 5).you(body).chosen_move(), expected, "{body:?}");
+        }
+    }
+
+    #[test]
+    fn never_leaves_the_board_from_any_edge() {
+        // Head mid-edge with no food, and every move ahead of the off-board
+        // one in fixed order blocked, so only the edge check stops it.
+        let top = board(5, 5).you(&[(2, 4), (2, 3), (2, 2)]);
+        let bottom = board(5, 5).you(&[(2, 0), (2, 1), (2, 2)]);
+        let left = board(5, 5)
+            .you(&[(0, 2), (0, 3), (0, 4)])
+            .opponent(&[(0, 1), (0, 0)]);
+        let right = board(5, 5)
+            .you(&[(4, 2), (4, 3), (4, 4)])
+            .opponent(&[(4, 1), (4, 0)]);
+
+        assert_eq!(top.chosen_move(), Move::Left);
+        assert_eq!(bottom.chosen_move(), Move::Left);
+        assert_eq!(left.chosen_move(), Move::Right);
+        assert_eq!(right.chosen_move(), Move::Left);
     }
 
     #[test]
@@ -316,6 +330,35 @@ mod tests {
             .food(0, 3)
             .chosen_move();
         assert_eq!(chosen, Move::Left);
+    }
+
+    #[test]
+    fn follows_the_fixed_move_order_when_there_is_no_food() {
+        // Up is blocked by its own body; down, left and right tie on space.
+        let chosen = board(5, 5).you(&[(2, 2), (2, 3), (2, 4)]).chosen_move();
+        assert_eq!(chosen, Move::Down);
+    }
+
+    #[test]
+    fn moves_towards_food_on_the_y_axis_when_x_is_aligned() {
+        // Food directly below; up, down and left tie on space.
+        let chosen = board(7, 7)
+            .you(&[(3, 3), (4, 3), (5, 3)])
+            .food(3, 0)
+            .chosen_move();
+        assert_eq!(chosen, Move::Down);
+    }
+
+    #[test]
+    fn breaks_ties_in_fixed_move_order_when_food_is_diagonal() {
+        // Food is up and to the left: up and left tie on space and on distance
+        // to the nearest food, so up wins, on every call.
+        let state = board(7, 7)
+            .you(&[(3, 3), (3, 2), (3, 1)])
+            .food(0, 6)
+            .state();
+        assert_eq!(choose_move(&state), Move::Up);
+        assert_eq!(choose_move(&state), Move::Up);
     }
 
     #[test]
