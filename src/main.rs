@@ -1,10 +1,12 @@
 #[macro_use]
 extern crate rocket;
 
+use env_logger::Env;
 use log::info;
 use rocket::fairing::AdHoc;
 use rocket::http::Status;
 use rocket::serde::json::Json;
+use rocket::{Build, Rocket};
 use serde_json::Value;
 use std::env;
 
@@ -38,28 +40,64 @@ fn handle_end(end_req: Json<GameState>) -> Status {
 
 #[launch]
 fn rocket() -> _ {
-    // Hosting platforms set `PORT`, but Rocket reads `ROCKET_PORT`.
-    if let Ok(port) = env::var("PORT") {
-        env::set_var("ROCKET_PORT", &port);
-    }
-
-    // Default to info-level logging unless `RUST_LOG` is already set.
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info");
-    }
-
-    env_logger::init();
+    // Log at info unless `RUST_LOG` says otherwise.
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     info!("Starting Battlesnake Server...");
 
-    rocket::build()
+    server(env::var("PORT").ok().as_deref())
+}
+
+/// Builds the server, taking its port from `port` (the `PORT` variable
+/// hosting platforms set) when given, otherwise from Rocket's own config.
+fn server(port: Option<&str>) -> Rocket<Build> {
+    let mut figment = rocket::Config::figment();
+    if let Some(port) = port {
+        let port: u16 = port
+            .parse()
+            .unwrap_or_else(|_| panic!("PORT must be a port number, got {port:?}"));
+        figment = figment.merge(("port", port));
+    }
+
+    rocket::custom(figment)
         .attach(AdHoc::on_response("Server ID Middleware", |_, res| {
             Box::pin(async move {
-                res.set_raw_header("Server", "battlesnake/github/starter-snake-rust");
+                res.set_raw_header("Server", "battlesnake/github/ferisss");
             })
         }))
         .mount(
             "/",
             routes![handle_index, handle_start, handle_move, handle_end],
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::server;
+    use rocket::local::blocking::Client;
+
+    #[test]
+    fn responses_identify_ferisss_in_the_server_header() {
+        let client = Client::tracked(server(None)).unwrap();
+        let response = client.get("/").dispatch();
+        assert_eq!(
+            response.headers().get_one("Server"),
+            Some("battlesnake/github/ferisss")
+        );
+    }
+
+    #[test]
+    fn port_defaults_to_8000() {
+        let port: u16 = server(None).figment().extract_inner("port").unwrap();
+        assert_eq!(port, 8000);
+    }
+
+    #[test]
+    fn port_variable_overrides_the_default() {
+        let port: u16 = server(Some("9000"))
+            .figment()
+            .extract_inner("port")
+            .unwrap();
+        assert_eq!(port, 9000);
+    }
 }
